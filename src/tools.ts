@@ -14,7 +14,7 @@ import type { metrics as MetricsAPI } from "./metrics-manager.js";
 // Держать в синхроне с package.json version при релизе — позволяет пилоту
 // и агенту увидеть через gateway_status, что демон отстал от установленного
 // пина после апдейта setup-local-gateway.sh (Fable 5 review, Д1, WP-499 Ф16).
-export const GATEWAY_VERSION = "0.1.0";
+export const GATEWAY_VERSION = "0.2.0";
 
 const acquireSchema = z.object({
   file: z.string().min(1, "file required"),
@@ -41,7 +41,7 @@ export const TOOL_LIST = [
   {
     name: "acquire_file_lock",
     description:
-      "Pessimistic-lock на запись файла. Возвращает success или collision с info о текущем держателе. TTL по умолчанию 300s (5 минут). Обязателен ПЕРЕД write_file в multi-agent сессии.",
+      "Pessimistic-lock на запись файла. Возвращает success (с монотонным fencing_token в lock.fencingToken — сохрани и сверь с gateway_status перед финальной записью: другой токен на том же файле = твоя аренда протухла и перевыдана, перечитай файл и возьми lock заново) или collision с info о текущем держателе. TTL по умолчанию 300s (5 минут). Обязателен ПЕРЕД write_file в multi-agent сессии.",
     inputSchema: {
       type: "object",
       properties: {

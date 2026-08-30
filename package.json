@@ -1,6 +1,6 @@
 {
   "name": "iwe-local-gateway",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Local MCP Gateway для multi-agent IWE сессии в VS Code (реализация DP.SC.034 / DP.IWE.005). Shared lock state через Unix socket daemon.",
   "type": "module",
   "engines": {

@@ -118,4 +118,55 @@ describe("LockManager", () => {
 
     expect(takeovers).toHaveLength(0);
   });
+
+  it("fencing: fresh acquires get strictly increasing tokens", () => {
+    const a = lm.acquire("/tmp/a.py", "claude");
+    const b = lm.acquire("/tmp/b.py", "claude");
+    expect(a.ok && b.ok).toBe(true);
+    if (a.ok && b.ok) {
+      expect(a.lock.fencingToken).toBeGreaterThan(0);
+      expect(b.lock.fencingToken).toBeGreaterThan(a.lock.fencingToken);
+    }
+  });
+
+  it("fencing: same-holder heartbeat keeps the original token", () => {
+    const first = lm.acquire("/tmp/foo.py", "claude");
+    const heartbeat = lm.acquire("/tmp/foo.py", "claude");
+    expect(first.ok && heartbeat.ok).toBe(true);
+    if (first.ok && heartbeat.ok) {
+      expect(heartbeat.lock.fencingToken).toBe(first.lock.fencingToken);
+    }
+  });
+
+  it("fencing: token survives restart monotonically even if the clock went backwards", async () => {
+    const os = await import("node:os");
+    const fsm = await import("node:fs");
+    const pathm = await import("node:path");
+    const state = pathm.join(os.tmpdir(), `fencing-test-${process.pid}-${Date.now()}.seq`);
+    try {
+      const first = new LockManager(state);
+      const a = first.acquire("/tmp/a.py", "claude");
+      expect(a.ok).toBe(true);
+      const tokenA = a.ok ? a.lock.fencingToken : 0;
+      // Simulate a clock rollback: persist a state value far in the future,
+      // as if the previous process issued tokens past the current clock.
+      fsm.writeFileSync(state, String(tokenA + 10_000_000));
+      const second = new LockManager(state);
+      const b = second.acquire("/tmp/a.py", "claude");
+      expect(b.ok).toBe(true);
+      if (b.ok) expect(b.lock.fencingToken).toBeGreaterThan(tokenA + 10_000_000);
+    } finally {
+      fsm.rmSync(state, { force: true });
+    }
+  });
+
+  it("fencing: TTL takeover issues a strictly greater token than the stale lease", async () => {
+    const stale = lm.acquire("/tmp/foo.py", "claude", 10);
+    await new Promise((r) => setTimeout(r, 20));
+    const fresh = lm.acquire("/tmp/foo.py", "kimikode");
+    expect(stale.ok && fresh.ok).toBe(true);
+    if (stale.ok && fresh.ok) {
+      expect(fresh.lock.fencingToken).toBeGreaterThan(stale.lock.fencingToken);
+    }
+  });
 });

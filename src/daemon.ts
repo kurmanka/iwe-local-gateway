@@ -38,8 +38,9 @@ const { socketPath: SOCKET_PATH, pidPath: PID_PATH } = resolveDaemonPaths(
   os.homedir(),
 );
 
-// Shared state across all connected agents.
-const sharedLocks = new LockManager();
+// Shared state across all connected agents. The fencing state file keeps
+// tokens monotonic across daemon restarts (same dir as socket/pid).
+const sharedLocks = new LockManager(path.join(path.dirname(SOCKET_PATH), "gateway-fencing.seq"));
 const sharedPeerStatus = new PeerStatusManager();
 
 // Keep metrics.active_locks in sync when TTL silently drops a lock.

@@ -4,6 +4,7 @@
 
 import path from "node:path";
 import os from "node:os";
+import fs from "node:fs";
 
 export interface Lock {
   file: string;
@@ -11,6 +12,13 @@ export interface Lock {
   acquiredAt: string; // ISO timestamp
   ttlMs: number;
   expiresAt: number; // epoch ms
+  // Monotonic fencing token (WP-530, peer-session 2026-08-30-01): a writer
+  // that saved its token at acquire time can detect before the final write
+  // that the lock was re-issued to someone else after its TTL expired --
+  // without this, a slow holder past its TTL can overwrite the new holder's
+  // work with zero signal. Compare against gateway_status: a differing token
+  // for the same file means "my lease is stale, re-read and re-acquire".
+  fencingToken: number;
 }
 
 export interface LockAcquireResult {
@@ -34,6 +42,40 @@ const DEFAULT_TTL_MS = 5 * 60 * 1000; // 5 minutes, see DP.IWE.005 §9 Q1
 
 export class LockManager {
   private readonly locks = new Map<string, Lock>();
+
+  // Monotonic across restarts (Codex review, round 3: a bare Date.now() seed
+  // breaks on clock rollback, same-ms restarts, and a predecessor that issued
+  // tokens past its own seed). Seed = max(clock, persisted_last + 1); every
+  // issued token is persisted back. Without a statePath (unit tests) it
+  // degrades to the clock seed — process-local monotonicity only.
+  private fencingCounter: number;
+  private readonly fencingStatePath?: string;
+
+  constructor(fencingStatePath?: string) {
+    this.fencingStatePath = fencingStatePath;
+    let persisted = 0;
+    if (fencingStatePath) {
+      try {
+        persisted = Number(fs.readFileSync(fencingStatePath, "utf-8").trim()) || 0;
+      } catch {
+        // First run or unreadable state: fall back to the clock seed below.
+      }
+    }
+    this.fencingCounter = Math.max(Date.now(), persisted + 1);
+  }
+
+  private issueFencingToken(): number {
+    const token = ++this.fencingCounter;
+    if (this.fencingStatePath) {
+      try {
+        fs.writeFileSync(this.fencingStatePath, String(token));
+      } catch (e) {
+        // Token stays valid in-process; only restart-monotonicity degrades.
+        console.error(`[lock-manager] fencing state write failed: ${e}`);
+      }
+    }
+    return token;
+  }
 
   // Fired when a lock is silently dropped by TTL expiry (not by explicit release).
   // Consumers (e.g. metrics) use this to keep derived counters consistent.
@@ -85,13 +127,21 @@ export class LockManager {
     if (beforePrune && !existing && beforePrune.holder !== holder) {
       this.onTtlTakeover?.(key, beforePrune, holder);
     }
-    // Re-acquire by same holder intentionally refreshes TTL (heartbeat pattern).
+    // Re-acquire by same holder intentionally refreshes TTL (heartbeat
+    // pattern) and KEEPS the token: a heartbeat must not invalidate the
+    // token the holder saved at first acquire. A fresh acquire or a TTL
+    // takeover issues a new, strictly greater token.
+    const fencingToken =
+      existing && existing.holder === holder
+        ? existing.fencingToken
+        : this.issueFencingToken();
     const lock: Lock = {
       file: key,
       holder,
       acquiredAt: new Date(now).toISOString(),
       ttlMs,
       expiresAt: now + ttlMs,
+      fencingToken,
     };
     this.locks.set(key, lock);
     return { ok: true, lock };
