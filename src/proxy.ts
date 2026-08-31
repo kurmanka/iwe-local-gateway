@@ -20,7 +20,21 @@ const SOCKET_PATH =
 // could freely re-acquire the other's lock (acquire() treats same-holder as
 // idempotent, not collision). Suffix with a per-process UUID so unconfigured
 // sessions stay isolated from each other, same as configured ones.
-const AGENT_ID = process.env.IWE_AGENT_ID ?? `unknown-agent-${randomUUID().slice(0, 8)}`;
+//
+// WP-530 Ф19: same collision when IWE_AGENT_ID IS configured — .mcp.json
+// sets it as one static literal, shared by every parallel session of that
+// vendor. CLAUDE_CODE_SESSION_ID is inherited into this process (confirmed
+// live via `ps eww` on running proxy.js instances) and stays stable across
+// a proxy restart within one session — unlike a fresh UUID, it can't
+// self-collide with the session's own pre-restart lock (daemon.ts drops
+// peer-status on disconnect, not the lock itself). Falls back to UUID if
+// the variable is absent, same as the unconfigured case above.
+// `||`, not `??`: an empty string must fall back too, not just undefined —
+// a blank value would silently collapse back to the pre-fix collision.
+const SESSION_SUFFIX = process.env.CLAUDE_CODE_SESSION_ID || randomUUID();
+const AGENT_ID = process.env.IWE_AGENT_ID
+  ? `${process.env.IWE_AGENT_ID}-${SESSION_SUFFIX}`
+  : `unknown-agent-${randomUUID().slice(0, 8)}`;
 
 if (!process.env.IWE_AGENT_ID) {
   process.stderr.write(
