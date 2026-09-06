@@ -8,7 +8,7 @@ Local MCP Gateway для multi-agent IWE сессии в VS Code.
 
 ## Что делает
 
-Координирует write-операции между peer-агентами (Claude Code, Kimikode и др.), работающими над одним workspace:
+Координирует write-операции между peer-агентами (Claude Code, Kimi Code и др.), работающими над одним workspace:
 
 - `gateway_status` — список активных file-locks с держателями
 - `acquire_file_lock` — pessimistic-lock на файл (TTL 5 мин по умолчанию)
@@ -17,7 +17,7 @@ Local MCP Gateway для multi-agent IWE сессии в VS Code.
 ## Статус реализации
 
 - ✅ **Unix socket daemon** — единственный процесс, shared lock state (реальный multi-agent)
-- ✅ **stdio proxy** — мост stdio↔socket для подключения Claude Code / Kimikode
+- ✅ **stdio proxy** — мост stdio↔socket для подключения Claude Code / Kimi Code
 - ✅ **stdio server** — режим MVP для тестов и single-agent
 - ✅ In-memory lock manager с TTL auto-expiry
 - ✅ Path canonicalization (`~/foo` ≡ `/Users/x/foo`)
@@ -71,13 +71,13 @@ Claude → acquire_file_lock({file: "src/auth.py"})  → ok
 Claude → write src/auth.py                          → ok
 Claude → release_file_lock({file: "src/auth.py"})  → ok
 
-Kimikode → acquire_file_lock({file: "src/auth.py"}) → ok (теперь свободен)
+Kimi Code → acquire_file_lock({file: "src/auth.py"}) → ok (теперь свободен)
 ```
 
 При collision (попытка acquire когда другой держит):
 
 ```
-Kimikode → acquire_file_lock({file: "src/auth.py"})
+Kimi Code → acquire_file_lock({file: "src/auth.py"})
   → error: lock_collision, holder: claude, acquired_at: 2026-05-11T16:42:00Z
   → решение: backoff polling ИЛИ переключение на другой файл (см. DP.SC.035 / DP.ROLE.039)
 ```
